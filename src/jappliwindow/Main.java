@@ -1,17 +1,27 @@
 package jappliwindow;
 
-import java.util.ArrayList;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.sql.PreparedStatement;
 import java.util.Scanner;
 
 public class Main {
-    private static ArrayList<Categorie> categories = new ArrayList<>();
     private static Statistiques statistiques = new Statistiques();
-    private static ArrayList<Utilisateur> utilisateurs = new ArrayList<>();
     private static Scanner scanner = new Scanner(System.in);
 
     public static void main(String[] args) {
-        boolean continuer = true;
+        try (Connection conn = DatabaseManager.getConnection()) {
+            if (conn != null) {
+                System.out.println("Connexion réussie à la base de données MySQL !");
+            }
+        } catch (SQLException e) {
+            System.err.println("Erreur de connexion à la base de données : " + e.getMessage());
+            e.printStackTrace();
+        }
 
+        boolean continuer = true;
         while (continuer) {
             afficherMenu();
             int choix = scanner.nextInt();
@@ -47,7 +57,7 @@ public class Main {
     }
 
     private static void afficherMenu() {
-    	System.out.println("BIENVENUE SUR LE DASHBOARD DE NOTRE SITE DE TELECHARGEMENTS D'IMAGE EN LIGNE ");
+        System.out.println("BIENVENUE SUR LE DASHBOARD DE NOTRE SITE DE TELECHARGEMENTS D'IMAGE EN LIGNE ");
         System.out.println("1. Ajouter un utilisateur");
         System.out.println("2. Ajouter une image");
         System.out.println("3. Afficher les statistiques");
@@ -61,22 +71,29 @@ public class Main {
     private static void ajouterUtilisateur() {
         System.out.print("Entrez l'ID de l'utilisateur : ");
         int idUtilisateur = scanner.nextInt();
-        scanner.nextLine(); // Consommer le saut de ligne
+        scanner.nextLine();
         System.out.print("Entrez le nom de l'utilisateur : ");
         String nom = scanner.nextLine();
 
-        Utilisateur utilisateur = new Utilisateur(idUtilisateur, nom);
-        utilisateurs.add(utilisateur);
-        System.out.println("Utilisateur ajouté avec succès !");
+        String sql = "INSERT INTO Utilisateur (idUtilisateur, nom) VALUES (?, ?)";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, idUtilisateur);
+            pstmt.setString(2, nom);
+            pstmt.executeUpdate();
+            System.out.println("Utilisateur ajouté avec succès !");
+        } catch (SQLException e) {
+            System.err.println("Erreur lors de l'ajout de l'utilisateur : " + e.getMessage());
+        }
     }
 
     private static void ajouterImage() {
         System.out.print("Entrez l'ID de l'utilisateur qui ajoute l'image : ");
         int idUtilisateur = scanner.nextInt();
-        scanner.nextLine(); // Consommer le saut de ligne
-
-        Utilisateur utilisateur = trouverUtilisateurParId(idUtilisateur);
-        if (utilisateur == null) {
+        scanner.nextLine();
+        
+        if (!utilisateurExiste(idUtilisateur)) {
             System.out.println("Utilisateur non trouvé.");
             return;
         }
@@ -87,80 +104,108 @@ public class Main {
         String titre = scanner.nextLine();
         System.out.print("Entrez la description de l'image : ");
         String description = scanner.nextLine();
-        System.out.print("Entrez le nom de la catégorie : ");
-        String nomCategorie = scanner.nextLine();
 
-        // Créer une nouvelle image
-        Image image = new Image(nomFichier, titre, description);
-        statistiques.ajouterImageTelechargee(image);
+        String sql = "INSERT INTO Image (idUtilisateur, nomFichier, titre, description) VALUES (?, ?, ?, ?)";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
-        // Ajouter l'image à la catégorie correspondante
-        Categorie categorie = trouverOuCreerCategorie(nomCategorie);
-        categorie.ajouterImage(image);
-
-        // Ajouter l'image à la galerie de l'utilisateur
-        utilisateur.ajouterImageAGalerie(image);
-
-        System.out.println("Image ajoutée avec succès !");
+            pstmt.setInt(1, idUtilisateur);
+            pstmt.setString(2, nomFichier);
+            pstmt.setString(3, titre);
+            pstmt.setString(4, description);
+            pstmt.executeUpdate();
+            System.out.println("Image ajoutée avec succès !");
+        } catch (SQLException e) {
+            System.err.println("Erreur lors de l'ajout de l'image : " + e.getMessage());
+        }
     }
 
     private static void afficherImagesUtilisateur() {
         System.out.print("Entrez l'ID de l'utilisateur : ");
         int idUtilisateur = scanner.nextInt();
-        scanner.nextLine(); // Consommer le saut de ligne
+        scanner.nextLine();
 
-        Utilisateur utilisateur = trouverUtilisateurParId(idUtilisateur);
-        if (utilisateur == null) {
-            System.out.println("Utilisateur non trouvé.");
-            return;
+        String sql = "SELECT * FROM Image WHERE idUtilisateur = ?";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, idUtilisateur);
+            ResultSet rs = pstmt.executeQuery();
+
+            while (rs.next()) {
+                String titre = rs.getString("titre");
+                String description = rs.getString("description");
+                System.out.println("Titre : " + titre + ", Description : " + description);
+            }
+        } catch (SQLException e) {
+            System.err.println("Erreur lors de l'affichage des images : " + e.getMessage());
         }
-
-        utilisateur.afficherImagesDansGalerie();
     }
 
     private static void retirerImageUtilisateur() {
-        System.out.print("Entrez l'ID de l'utilisateur : ");
-        int idUtilisateur = scanner.nextInt();
-        scanner.nextLine(); // Consommer le saut de ligne
+        System.out.print("Entrez le titre de l'image à retirer : ");
+        String titreImage = scanner.nextLine();
 
-        Utilisateur utilisateur = trouverUtilisateurParId(idUtilisateur);
-        if (utilisateur == null) {
-            System.out.println("Utilisateur non trouvé.");
+        String sql = "DELETE FROM Image WHERE titre = ?";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, titreImage);
+            int rowsDeleted = pstmt.executeUpdate();
+            if (rowsDeleted > 0) {
+                System.out.println("Image retirée avec succès !");
+            } else {
+                System.out.println("Image non trouvée.");
+            }
+        } catch (SQLException e) {
+            System.err.println("Erreur lors de la suppression de l'image : " + e.getMessage());
+        }
+    }
+    
+ // Méthode pour vérifier le mot de passe de l'administrateur
+    private static boolean verifierMotDePasseAdmin(String nomAdmin, String motDePasseSaisi) {
+        String sql = "SELECT motDePasse FROM Administrateur WHERE nomAdmin = ?";
+        
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, nomAdmin);
+            ResultSet rs = pstmt.executeQuery();
+
+            if (rs.next()) {
+                String motDePasseStocke = rs.getString("motDePasse");
+
+                // Comparer le mot de passe saisi avec celui stocké (ici on suppose qu'il est haché)
+                if (motDePasseStocke.equals(motDePasseSaisi)) {
+                    return true;
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("Erreur lors de la vérification du mot de passe : " + e.getMessage());
+        }
+        return false;
+    }
+
+
+    private static void gererUtilisateurs() {
+        System.out.print("Entrez le nom de l'administrateur : ");
+        String nomAdmin = scanner.nextLine();
+
+        System.out.print("Entrez le mot de passe pour accéder à la gestion des utilisateurs : ");
+        String motDePasseSaisi = scanner.nextLine();
+
+        // Vérifier le nom et le mot de passe (ici on compare avec ceux stockés dans la base de données)
+        if (!verifierMotDePasseAdmin(nomAdmin, motDePasseSaisi)) {
+            System.out.println("Nom ou mot de passe incorrect. Accès refusé.");
             return;
         }
 
-        System.out.print("Entrez le titre de l'image à retirer : ");
-        String titreImage = scanner.nextLine();
-        Image imageARetirer = null;
-
-        // Recherche de l'image à retirer
-        for (Image image : utilisateur.getGalerie().getImages()) {
-            if (image.getTitre().equals(titreImage)) {
-                imageARetirer = image;
-                break;
-            }
-        }
-
-        if (imageARetirer != null) {
-            utilisateur.retirerImageDeGalerie(imageARetirer);
-            statistiques.retirerImageTelechargee(imageARetirer); // Retirer de la statistique si nécessaire
-            Categorie categorie = trouverCategorieParImage(imageARetirer);
-            if (categorie != null) {
-                categorie.retirerImage(imageARetirer); // Retirer de la catégorie si nécessaire
-            }
-            System.out.println("Image retirée avec succès !");
-        } else {
-            System.out.println("Image non trouvée dans la galerie de l'utilisateur.");
-        }
-    }
-
-    private static void gererUtilisateurs() {
         System.out.println("Options de gestion des utilisateurs :");
         System.out.println("1. Lister tous les utilisateurs");
         System.out.println("2. Supprimer un utilisateur");
         System.out.print("Choisissez une option : ");
         int choix = scanner.nextInt();
-        scanner.nextLine(); // Consommer le saut de ligne
+        scanner.nextLine();
 
         switch (choix) {
             case 1:
@@ -174,53 +219,56 @@ public class Main {
         }
     }
 
+    
+
     private static void listerUtilisateurs() {
-        System.out.println("Liste des utilisateurs :");
-        for (Utilisateur utilisateur : utilisateurs) {
-            System.out.println("ID: " + utilisateur.getIdUtilisateur() + ", Nom: " + utilisateur.getNom());
+        String sql = "SELECT * FROM Utilisateur";
+        try (Connection conn = DatabaseManager.getConnection();
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                int id = rs.getInt("idUtilisateur");
+                String nom = rs.getString("nom");
+                System.out.println("ID : " + id + ", Nom : " + nom);
+            }
+        } catch (SQLException e) {
+            System.err.println("Erreur lors de la récupération des utilisateurs : " + e.getMessage());
         }
     }
 
     private static void supprimerUtilisateur() {
         System.out.print("Entrez l'ID de l'utilisateur à supprimer : ");
         int idUtilisateur = scanner.nextInt();
-        scanner.nextLine(); // Consommer le saut de ligne
+        scanner.nextLine();
 
-        Utilisateur utilisateurASupprimer = trouverUtilisateurParId(idUtilisateur);
-        if (utilisateurASupprimer != null) {
-            utilisateurs.remove(utilisateurASupprimer);
-            System.out.println("Utilisateur supprimé avec succès !");
-        } else {
-            System.out.println("Utilisateur non trouvé.");
+        String sql = "DELETE FROM Utilisateur WHERE idUtilisateur = ?";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setInt(1, idUtilisateur);
+            int rowsDeleted = pstmt.executeUpdate();
+            if (rowsDeleted > 0) {
+                System.out.println("Utilisateur supprimé avec succès !");
+            } else {
+                System.out.println("Utilisateur non trouvé.");
+            }
+        } catch (SQLException e) {
+            System.err.println("Erreur lors de la suppression de l'utilisateur : " + e.getMessage());
         }
     }
 
-    private static Categorie trouverOuCreerCategorie(String nomCategorie) {
-        for (Categorie categorie : categories) {
-            if (categorie.getNomCategorie().equals(nomCategorie)) {
-                return categorie;
-            }
-        }
-        Categorie nouvelleCategorie = new Categorie(nomCategorie);
-        categories.add(nouvelleCategorie);
-        return nouvelleCategorie;
-    }
+    private static boolean utilisateurExiste(int idUtilisateur) {
+        String sql = "SELECT * FROM Utilisateur WHERE idUtilisateur = ?";
+        try (Connection conn = DatabaseManager.getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
-    private static Utilisateur trouverUtilisateurParId(int idUtilisateur) {
-        for (Utilisateur utilisateur : utilisateurs) {
-            if (utilisateur.getIdUtilisateur() == idUtilisateur) {
-                return utilisateur;
-            }
+            pstmt.setInt(1, idUtilisateur);
+            ResultSet rs = pstmt.executeQuery();
+            return rs.next();
+        } catch (SQLException e) {
+            System.err.println("Erreur lors de la vérification de l'utilisateur : " + e.getMessage());
         }
-        return null; // Utilisateur non trouvé
-    }
-
-    private static Categorie trouverCategorieParImage(Image image) {
-        for (Categorie categorie : categories) {
-            if (categorie.getImages().contains(image)) {
-                return categorie;
-            }
-        }
-        return null; // Catégorie non trouvée
+        return false;
     }
 }
